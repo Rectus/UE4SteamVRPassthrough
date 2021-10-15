@@ -1,0 +1,28 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "SteamVR Camera Passthrough",
+	"Description": "Support for the SteamVR Tracked Camera API",
+	"Category": "Virtual Reality",
+	"CreatedBy": "Rectus",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EnabledByDefault": true,
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"SupportedTargetPlatforms": [
+		"Win32",
+		"Win64"
+	],
+	"Modules": [
+		{
+			"Name": "SteamVRPassthrough",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit"
+		}
+	]
+}

@@ -1,0 +1,114 @@
+#include "/Engine/Private/PostProcessMaterialShaders.usf"
+
+
+float4x4 FrameTransformMatrixFar;
+float4x4 FrameTransformMatrixNear;
+float2 FrameUVOffset;
+
+
+void MainVS_Passthrough(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out FPostProcessMaterialVSToPS Output,
+	out float3 OutCameraUVFar : TEXCOORD1,
+	out float3 OutCameraUVNear : TEXCOORD2
+	)
+{
+	Output = (FPostProcessMaterialVSToPS)0;
+	DrawRectangle(InPosition, Output.Position);
+
+#if NUM_TEX_COORD_INTERPOLATORS
+	FMaterialVertexParameters VertexParameters = GetPostProcessMaterialVSParameters(InPosition.xy);
+	 
+	float2 CustomizedUVs[NUM_TEX_COORD_INTERPOLATORS];
+	GetMaterialCustomizedUVs(VertexParameters, CustomizedUVs);
+	GetCustomInterpolators(VertexParameters, CustomizedUVs);
+	
+	{
+		UNROLL
+		for (int CoordinateIndex = 0; CoordinateIndex < NUM_MATERIAL_TEXCOORDS; CoordinateIndex++)
+		{
+			SetUV(Output, CoordinateIndex, InPosition.xy);
+		}
+	}
+	{
+		UNROLL
+		for (int CoordinateIndex = NUM_MATERIAL_TEXCOORDS; CoordinateIndex < NUM_TEX_COORD_INTERPOLATORS; CoordinateIndex++)
+		{
+			SetUV(Output, CoordinateIndex, CustomizedUVs[CoordinateIndex]);
+		}
+	}
+#endif
+
+// Calculate the UVs only if they are used in the material editor
+#if NUM_MATERIAL_TEXCOORDS > 0
+	OutCameraUVFar = mul(FrameTransformMatrixFar, float4(InTexCoord.xy, 1.0, 1.0)).xyz;
+#endif
+
+#if NUM_MATERIAL_TEXCOORDS > 1
+	OutCameraUVNear = mul(FrameTransformMatrixNear, float4(InTexCoord.xy, 1.0, 1.0)).xyz;
+#endif
+}
+
+void MainPS_Passthrough(
+	in FPostProcessMaterialVSToPS Input,
+	in float3 InCameraUVFar : TEXCOORD1,
+	in float3 InCameraUVNear : TEXCOORD2,
+	out float4 OutColor : SV_Target0
+	)
+{
+	ResolvedView = ResolveView();
+	FMaterialPixelParameters Parameters = MakeInitializedMaterialPixelParameters();
+	FPixelMaterialInputs PixelMaterialInputs;
+
+	// can be optimized
+	float4 SvPosition = Input.Position;
+	float2 ViewportUV = (SvPosition.xy - PostProcessOutput_ViewportMin.xy) * PostProcessOutput_ViewportSizeInverse.xy;
+
+#if NUM_TEX_COORD_INTERPOLATORS
+	{
+		UNROLL
+		for (int CoordinateIndex = 0; CoordinateIndex < NUM_MATERIAL_TEXCOORDS; CoordinateIndex++)
+		{
+			Parameters.TexCoords[CoordinateIndex] = ViewportUV;
+		}
+	}
+	{
+		UNROLL
+		for (int CoordinateIndex = NUM_MATERIAL_TEXCOORDS; CoordinateIndex < NUM_TEX_COORD_INTERPOLATORS; CoordinateIndex++)
+		{
+			Parameters.TexCoords[CoordinateIndex] = GetUV(Input, CoordinateIndex);
+		}
+	}
+#endif
+
+#if NUM_MATERIAL_TEXCOORDS > 0
+	float2 outCameraUVFar = InCameraUVFar.xy / InCameraUVFar.z;
+    Parameters.TexCoords[0] = outCameraUVFar + FrameUVOffset;
+#endif
+
+#if NUM_MATERIAL_TEXCOORDS > 1
+	float2 outCameraUVNear = InCameraUVNear.xy / InCameraUVNear.z;
+    Parameters.TexCoords[1] = outCameraUVNear + FrameUVOffset;
+#endif
+
+	Parameters.VertexColor = 1;
+	
+	SvPosition.z = LookupDeviceZ(ViewportUVToBufferUV(ViewportUV));
+	SvPosition.z = max(SvPosition.z, 1e-18);
+
+	// fill out other related material parameters
+	CalcMaterialParametersPost(Parameters, PixelMaterialInputs, SvPosition, true);
+
+	// Grab emissive colour as output
+#if MATERIAL_OUTPUT_OPACITY_AS_ALPHA
+	const float Alpha = GetMaterialOpacity(PixelMaterialInputs);
+#else
+	const float Alpha = 1.0f;
+#endif
+	OutColor = float4(GetMaterialEmissive(PixelMaterialInputs), Alpha );
+
+#if !MATERIALBLENDING_MODULATE && USE_PREEXPOSURE && POST_PROCESS_MATERIAL_BEFORE_TONEMAP
+	OutColor.xyz *= View.PreExposure;
+#endif
+}

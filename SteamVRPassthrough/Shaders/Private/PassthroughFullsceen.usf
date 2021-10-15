@@ -1,0 +1,39 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+
+// Should be float3x3, but UE4 does not have a type for it
+float4x4 FrameTransformMatrixFar;
+Texture2D CameraTexture;
+SamplerState CameraTextureSampler;
+float2 FrameUVOffset;
+
+void MainVS(
+    in float4 InPosition : ATTRIBUTE0,
+    in float2 InUV : ATTRIBUTE1,
+    out float3 OutCameraUV : TEXCOORD0,
+    out float4 OutPosition : SV_POSITION
+    )
+{
+    DrawRectangle(InPosition, OutPosition);
+
+    // The UV projection is non-linear in R2, so homogenous coordinates are used and passed as such to the rasterizer.
+    OutCameraUV = mul(FrameTransformMatrixFar, float4(InUV.xy, 1.0, 1.0)).xyz;
+}
+
+EARLYDEPTHSTENCIL
+void MainPS(
+    in float3 InCameraUV : TEXCOORD0,
+    out float4 OutColor : SV_Target0
+    )
+{
+    float2 outCameraUvs = InCameraUV.xy / InCameraUV.z;
+
+    outCameraUvs = outCameraUvs + FrameUVOffset;
+
+	OutColor = CameraTexture.Sample(CameraTextureSampler, outCameraUvs);
+    
+    // Transform color back from linear to sRGB, 
+    // since the texture is passed as a type that is converted to linear by the sampler.
+    OutColor.xyz = pow(OutColor.xyz, 1.0 / 2.2);  
+}
