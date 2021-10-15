@@ -2,6 +2,8 @@ This Unreal Engine 4 plugin adds SteamVR passthrough camera support using the Op
 
 Supports Direct3D 11 shared textures for the camera feed. 
 
+Example project: https://github.com/Rectus/UE4SteamVRPassthrough_Example
+
 ### Note ###
 
 This is a very early release. It has only been tested with the Valve Index.
