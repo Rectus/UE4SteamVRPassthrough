@@ -52,7 +52,7 @@ public:
 		void DisableVideo();
 
 	/**
-	* Static function to detect if a camera is present.
+	* Static function to detect if a camera is present. Will return false if no XR system is active.
 	*/
 	UFUNCTION(BlueprintPure, Category = "SteamVR|Passthrough")
 		static bool HasCamera();
@@ -68,7 +68,7 @@ public:
 	* Removes all material parameter registartions from a material instance.
 	*/
 	UFUNCTION(BlueprintCallable, Category = "SteamVR|Passthrough")
-		void RemovePassthoughTransformParameters(const UMaterialInstance* Instance);
+		void RemovePassthoughParameters(const UMaterialInstance* Instance);
 
 	/**
 	* Registers a texture parameter to be continuously updated with the current camera frame. 
@@ -134,7 +134,7 @@ public:
 	/**
 	* Read-only access to the camera frame layout.
 	*/
-	UPROPERTY(BlueprintReadOnly, Category = Camera)
+	UPROPERTY(BlueprintReadOnly, BlueprintGetter = GetFrameLayout, Category = Camera)
 		TEnumAsByte<ESteamVRStereoFrameLayout> FrameLayout;
 
 	UFUNCTION(BlueprintSetter)
@@ -149,11 +149,12 @@ public:
 	UFUNCTION(BlueprintSetter)
 		void SetPostProcessMode(ESteamVRPostProcessPassthroughMode InPostProcessMode);
 
+	UFUNCTION(BlueprintGetter)
+		TEnumAsByte<ESteamVRStereoFrameLayout> GetFrameLayout();
+
 protected:
 
 	virtual void BeginPlay() override;
-	void UpdateFrameLayout();
-	static int32 GetDeviceIdForHMD();
 
 private:
 	

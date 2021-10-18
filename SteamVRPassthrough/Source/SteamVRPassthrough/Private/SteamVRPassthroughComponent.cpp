@@ -17,12 +17,6 @@ USteamVRPassthroughComponent::USteamVRPassthroughComponent()
 	PostProcessProjectionDistance = FVector2D(600.0, 100.0);
 	StencilTestValue = -1;
 	bEnableSharedCameraTexture = true;
-
-
-	if (HasCamera())
-	{
-		UpdateFrameLayout();
-	}
 }
 
 
@@ -32,8 +26,6 @@ USteamVRPassthroughComponent::~USteamVRPassthroughComponent()
 }
 
 
-
-// Called when the game starts
 void USteamVRPassthroughComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -42,24 +34,7 @@ void USteamVRPassthroughComponent::BeginPlay()
 
 bool USteamVRPassthroughComponent::HasCamera()
 {
-	if (!vr::VRSystem() || !vr::VRTrackedCamera())
-	{
-		return false;
-	}
-
-	int32 HMDId = GetDeviceIdForHMD();
-
-	bool bHasCamera = false;
-
-	vr::EVRTrackedCameraError Error = vr::VRTrackedCamera()->HasCamera(HMDId, &bHasCamera);
-
-	if (Error != vr::VRTrackedCameraError_None)
-	{
-		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Error [%i] checking camera on device Id %i"), (int)Error, HMDId);
-		return false;
-	}
-
-	return bHasCamera;
+	return FSteamVRPassthroughRenderer::HasCamera();
 }
 
 
@@ -128,6 +103,7 @@ void USteamVRPassthroughComponent::EnableVideo()
 	else
 	{
 		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Error enabling passthrough video!"));
+		PassthroughRenderer.Reset();
 	}
 }
 
@@ -149,11 +125,6 @@ void USteamVRPassthroughComponent::DisableVideo()
 				Parameter.Instance->SetTextureParameterValue(Parameter.TextureParameter, DefaultTexture);
 			}
 			Parameter.Instance->SetTextureParameterValue(Parameter.TextureParameter, nullptr);
-		}
-
-		if (PassthroughRenderer.IsValid())
-		{
-			PassthroughRenderer.Get()->Shutdown();
 		}
 	}
 
@@ -179,7 +150,7 @@ void USteamVRPassthroughComponent::AddPassthoughTransformParameter(UPARAM(ref) F
 }
 
 
-void USteamVRPassthroughComponent::RemovePassthoughTransformParameters(const UMaterialInstance* Instance)
+void USteamVRPassthroughComponent::RemovePassthoughParameters(const UMaterialInstance* Instance)
 {
 	if (PassthroughRenderer.IsValid())
 	{
@@ -188,6 +159,11 @@ void USteamVRPassthroughComponent::RemovePassthoughTransformParameters(const UMa
 
 	TransformParameters.RemoveAll(
 		[Instance](FSteamVRPassthoughUVTransformParameter& Parameter) {
+		return Parameter.Instance == Instance;
+	});
+
+	TextureParameters.RemoveAll(
+		[Instance](FSteamVRPassthoughTextureParameter& Parameter) {
 		return Parameter.Instance == Instance;
 	});
 }
@@ -208,7 +184,7 @@ void USteamVRPassthroughComponent::SetStencilTestValue(int32 InStencilTestValue)
 {
 	StencilTestValue = InStencilTestValue;
 
-	if (bEnabled)
+	if (PassthroughRenderer.IsValid())
 	{
 		PassthroughRenderer->SetDepthStencilTestValue(StencilTestValue);
 	}
@@ -261,53 +237,9 @@ void USteamVRPassthroughComponent::SetPostProcessMode(ESteamVRPostProcessPassthr
 }
 
 
-void USteamVRPassthroughComponent::UpdateFrameLayout()
+TEnumAsByte<ESteamVRStereoFrameLayout> USteamVRPassthroughComponent::GetFrameLayout()
 {
-	vr::TrackedPropertyError PropError;
-
-	int32 Layout = (vr::EVRTrackedCameraFrameLayout)vr::VRSystem()->GetInt32TrackedDeviceProperty(GetDeviceIdForHMD(), vr::Prop_CameraFrameLayout_Int32, &PropError);
-
-	if (PropError != vr::TrackedProp_Success)
-	{
-		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("GetTrackedCameraEyePoses error [%i]"), (int)PropError);
-		return;
-	}
-
-	if (Layout & vr::EVRTrackedCameraFrameLayout_Stereo)
-	{
-		if (Layout & vr::EVRTrackedCameraFrameLayout_VerticalLayout)
-		{
-			FrameLayout = StereoVerticalLayout;
-		}
-		else
-		{
-			FrameLayout = StereoHorizontalLayout;
-		}
-	}
-	else
-	{
-		FrameLayout = Mono;
-	}
-}
-
-
-int32 USteamVRPassthroughComponent::GetDeviceIdForHMD()
-{
-	if (!vr::VRSystem())
-	{
-		return 0;
-	}
-
-
-	for (int i = 0; i < vr::k_unMaxTrackedDeviceCount; i++)
-	{
-		if (vr::VRSystem()->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_HMD)
-		{
-			return i;
-		}
-	}
-
-	return 0;
+	return FSteamVRPassthroughRenderer::GetFrameLayout();
 }
 
 

@@ -22,6 +22,8 @@
 #include "MaterialShader.h"
 #include "HardwareInfo.h"
 #include "SceneTextureParameters.h"
+#include "IXRTrackingSystem.h"
+
 
 
 DECLARE_CYCLE_STAT(TEXT("SteamVRPassthrough_FrameBufferCopy"), STAT_FrameBufferCopy, STATGROUP_SteamVRPassthrough);
@@ -31,6 +33,21 @@ DECLARE_CYCLE_STAT(TEXT("SteamVRPassthrough_PoseUpdate"), STAT_PoseUpdate, STATG
 
 #define MAX_PROJECTION_MATRIX_CACHE_SIZE 8
 
+
+static TAutoConsoleVariable<bool> CVarAllowBackgroundRuntime(
+	TEXT("vr.SteamVRPassthrough.AllowBackgroundRuntime"),
+	true,
+	TEXT("Allow using the camera passthrough even when the SteamVR OpenVR runtime is not the active XR system.\n")
+	TEXT("This will attempt to initialize the OpenVR runtime in background mode\n") 
+	TEXT("when the passthrough video is activated while another XR system is active.\n")
+	TEXT("This is mainly intended to be used with the headset connected to the SteamVR OpenXR runtime.")
+);
+
+
+
+bool FSteamVRPassthroughRenderer::bIsSteamVRRuntimeInitialized = false;
+bool FSteamVRPassthroughRenderer::bDeferredRuntimeShutdown = false;
+int FSteamVRPassthroughRenderer::HMDDeviceId = -1;
 
 
 FORCEINLINE FMatrix ToFMatrix(const vr::HmdMatrix34_t& tm)
@@ -139,17 +156,19 @@ FScreenPassTexture FSteamVRPassthroughRenderer::DrawFullscreenPassthrough_Render
 		VSPassParameters->FrameTransformMatrixFar = RightFrameTransformFar;
 		//VSPassParameters->FrameTransformMatrixNear = RightFrameTransformNear;
 
-		if (FrameLayout & vr::EVRTrackedCameraFrameLayout_HorizontalLayout)
+		switch (FrameLayout)
 		{
-			PSPassParameters->FrameUVOffset = FVector2D(0.5, 0);
-		}
-		else if (FrameLayout & vr::EVRTrackedCameraFrameLayout_VerticalLayout)
-		{
-			PSPassParameters->FrameUVOffset = FVector2D(0, 0.5);
-		}
-		else
-		{
-			PSPassParameters->FrameUVOffset = FVector2D(0, 0);
+			case ESteamVRStereoFrameLayout::StereoHorizontalLayout:
+				PSPassParameters->FrameUVOffset = FVector2D(0.5, 0);
+				break;
+
+			case ESteamVRStereoFrameLayout::StereoVerticalLayout:
+				PSPassParameters->FrameUVOffset = FVector2D(0, 0.5);
+				break;
+
+			case ESteamVRStereoFrameLayout::Mono:
+				PSPassParameters->FrameUVOffset = FVector2D(0, 0);
+				break;
 		}
 	}
 
@@ -449,17 +468,19 @@ FScreenPassTexture FSteamVRPassthroughRenderer::DrawPostProcessMatPassthrough_Re
 		PassParameters->FrameTransformMatrixFar = RightFrameTransformFar;
 		PassParameters->FrameTransformMatrixNear = RightFrameTransformNear;
 
-		if (FrameLayout & vr::EVRTrackedCameraFrameLayout_HorizontalLayout)
+		switch (FrameLayout)
 		{
-			PassParameters->FrameUVOffset = FVector2D(0.5, 0);
-		}
-		else if (FrameLayout & vr::EVRTrackedCameraFrameLayout_VerticalLayout)
-		{
-			PassParameters->FrameUVOffset = FVector2D(0, 0.5);
-		}
-		else
-		{
-			PassParameters->FrameUVOffset = FVector2D(0, 0);
+			case ESteamVRStereoFrameLayout::StereoHorizontalLayout:
+				PassParameters->FrameUVOffset = FVector2D(0.5, 0);
+				break;
+
+			case ESteamVRStereoFrameLayout::StereoVerticalLayout:
+				PassParameters->FrameUVOffset = FVector2D(0, 0.5);
+				break;
+
+			case ESteamVRStereoFrameLayout::Mono:
+				PassParameters->FrameUVOffset = FVector2D(0, 0);
+				break;
 		}
 	}
 
@@ -555,6 +576,7 @@ FSteamVRPassthroughRenderer::FSteamVRPassthroughRenderer(const FAutoRegister& Au
 	PostProcessMaterial = nullptr;
 	PostProcessMaterialTemp = nullptr;
 	bIsInitialized = false;
+	bUsingBackgroundRuntime = false;
 }
 
 
@@ -563,6 +585,10 @@ FSteamVRPassthroughRenderer::~FSteamVRPassthroughRenderer()
 	if (bIsInitialized)
 	{
 		Shutdown();
+	}
+	if (bUsingBackgroundRuntime)
+	{
+		ShutdownBackgroundRuntime();
 	}
 }
 
@@ -608,28 +634,54 @@ bool FSteamVRPassthroughRenderer::Initialize()
 {
 	check(IsInGameThread());
 
+	UE_LOG(LogSteamVRPassthrough, Log, TEXT("Initializing SteamVR camera passthrough."));
+
 	if (bIsInitialized)
 	{
 		return true;
 	}
 
-
-	if (!vr::VRSystem())
+	if (!GEngine)
 	{
 		return false;
 	}
 
-	for (int i = 0; i < vr::k_unMaxTrackedDeviceCount; i++)
+	if (GEngine->XRSystem.IsValid() && GEngine->XRSystem->GetSystemName() == TEXT("SteamVR"))
 	{
-		if (vr::VRSystem()->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_HMD)
+		bIsSteamVRRuntimeInitialized = true;
+	}
+	else if (!bIsSteamVRRuntimeInitialized)
+	{
+		UE_LOG(LogSteamVRPassthrough, Log, TEXT("Separate XR runtime %s detected, starting background SteamVR instance."), *GEngine->XRSystem->GetSystemName().ToString());
+
+		if (InitBackgroundRuntime())
 		{
-			HMDDeviceId = i;
-			break;
+			bUsingBackgroundRuntime = true;
+		}
+		else
+		{
+			return false;
 		}
 	}
-
-	if (HMDDeviceId < 0 || !vr::VRTrackedCamera())
+	else
 	{
+		bUsingBackgroundRuntime = true;
+	}
+
+
+	if (!vr::VRSystem() || !vr::VRTrackedCamera() || !vr::VRCompositor())
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Invalid SteamVR interface handle!"));
+
+		return false;
+	}
+
+	UpdateHMDDeviceID();
+
+
+	if (HMDDeviceId < 0)
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("HMD device ID not found!"));
 		return false;
 	}
 
@@ -677,6 +729,8 @@ void FSteamVRPassthroughRenderer::Shutdown()
 	{
 		return;
 	}
+
+	UE_LOG(LogSteamVRPassthrough, Log, TEXT("Shutting down SteamVR camera passthrough."));
 
 	FScopeLock Lock(&RenderLock);
 
@@ -764,6 +818,174 @@ UTexture* FSteamVRPassthroughRenderer::GetCameraTexture()
 }
 
 
+void FSteamVRPassthroughRenderer::UpdateHMDDeviceID()
+{
+	for (int i = 0; i < vr::k_unMaxTrackedDeviceCount; i++)
+	{
+		if (vr::VRSystem()->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_HMD)
+		{
+			HMDDeviceId = i;
+			return;
+		}
+	}
+}
+
+
+bool FSteamVRPassthroughRenderer::InitBackgroundRuntime()
+{
+	if (!CVarAllowBackgroundRuntime.GetValueOnAnyThread())
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Background SteamVR runtime usage is disabled!"));
+
+		return false;
+	}
+
+	if (bIsSteamVRRuntimeInitialized)
+	{
+		return true;
+	}
+
+	vr::EVRInitError Error;
+	vr::VR_Init(&Error, vr::EVRApplicationType::VRApplication_Background);
+
+	if (Error != vr::EVRInitError::VRInitError_None)
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Failed to init SteamVR runtime as background app, error [%i]"), (int)Error, HMDDeviceId);
+		return false;
+	}
+
+	if (!vr::VRSystem() || !vr::VRTrackedCamera() || !vr::VRCompositor())
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Invalid SteamVR interface handle!"));
+
+		return false;
+	}
+
+	UpdateHMDDeviceID();
+
+	if (HMDDeviceId < 0)
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("HMD device ID not found!"));
+		return false;
+	}
+
+	bIsSteamVRRuntimeInitialized = true;
+	return true;
+}
+
+
+void FSteamVRPassthroughRenderer::ShutdownBackgroundRuntime()
+{
+	if (GetRuntimeStatus() != RuntimeStatus_InBackground)
+	{
+		return;
+	}
+
+	// Calling VR_Shutdown while the OpenXR runtime is active will hang the game,
+	// so add a delegate to do it on shutdown.
+	if (GEngine && GEngine->XRSystem.IsValid())
+	{
+		if (!bDeferredRuntimeShutdown)
+		{
+			bDeferredRuntimeShutdown = true;
+			FCoreDelegates::OnExit.AddLambda([]()
+			{
+				FSteamVRPassthroughRenderer::ShutdownBackgroundRuntime();
+			});
+		}
+		return;
+	}
+
+	vr::VR_Shutdown();
+	bIsSteamVRRuntimeInitialized = false;
+	bDeferredRuntimeShutdown = false;
+}
+
+
+ESteamVRRuntimeStatus FSteamVRPassthroughRenderer::GetRuntimeStatus()
+{
+	if (GEngine && GEngine->XRSystem.IsValid() && GEngine->XRSystem->GetSystemName() == TEXT("SteamVR"))
+	{
+		return RuntimeStatus_AsXRSystem;
+	}
+	
+	return bIsSteamVRRuntimeInitialized ? RuntimeStatus_InBackground : RuntimeStatus_NotRunning;
+}
+
+
+bool FSteamVRPassthroughRenderer::HasCamera()
+{
+	ESteamVRRuntimeStatus Status = FSteamVRPassthroughRenderer::GetRuntimeStatus();
+
+	if (Status == RuntimeStatus_NotRunning)
+	{
+		if (!GEngine || !GEngine->XRSystem.IsValid() || !CVarAllowBackgroundRuntime.GetValueOnAnyThread())
+		{
+			return false;
+		}
+
+		if (!FSteamVRPassthroughRenderer::InitBackgroundRuntime())
+		{
+			return false;
+		}
+	}
+
+	if (HMDDeviceId < 0)
+	{
+		UpdateHMDDeviceID();
+	}
+
+	bool bHasCamera = false;
+
+	vr::EVRTrackedCameraError Error = vr::VRTrackedCamera()->HasCamera(HMDDeviceId, &bHasCamera);
+
+	if (Error != vr::VRTrackedCameraError_None)
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Error [%i] checking camera on device Id %i"), (int)Error, HMDDeviceId);
+		return false;
+	}
+
+	return bHasCamera;
+}
+
+
+ESteamVRStereoFrameLayout FSteamVRPassthroughRenderer::GetFrameLayout()
+{
+	ESteamVRRuntimeStatus Status = FSteamVRPassthroughRenderer::GetRuntimeStatus();
+
+	if (Status == RuntimeStatus_NotRunning && !FSteamVRPassthroughRenderer::InitBackgroundRuntime())
+	{
+		return ESteamVRStereoFrameLayout::Mono;
+	}
+
+	vr::TrackedPropertyError Error;
+
+	int32 Layout = (vr::EVRTrackedCameraFrameLayout) vr::VRSystem()->GetInt32TrackedDeviceProperty(HMDDeviceId, vr::Prop_CameraFrameLayout_Int32, &Error);
+
+	if (Error != vr::TrackedProp_Success)
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("GetTrackedCameraEyePoses error [%i]"), (int)Error);
+		return ESteamVRStereoFrameLayout::Mono;
+	}
+
+	if ((Layout & vr::EVRTrackedCameraFrameLayout_Stereo) != 0)
+	{
+		if ((Layout & vr::EVRTrackedCameraFrameLayout_VerticalLayout) != 0)
+		{
+			return ESteamVRStereoFrameLayout::StereoVerticalLayout;
+		}
+		else
+		{
+			return ESteamVRStereoFrameLayout::StereoHorizontalLayout;
+		}
+	}
+	else
+	{
+		return ESteamVRStereoFrameLayout::Mono;
+	}
+}
+
+
 bool FSteamVRPassthroughRenderer::AcquireVideoStreamingService()
 {
 	if (vr::VRTrackedCamera())
@@ -785,17 +1007,16 @@ bool FSteamVRPassthroughRenderer::AcquireVideoStreamingService()
 
 void FSteamVRPassthroughRenderer::ReleaseVideoStreamingService()
 {
-	if (vr::VRTrackedCamera())
+	if (vr::VRTrackedCamera() && CameraHandle != INVALID_TRACKED_CAMERA_HANDLE)
 	{
 		vr::EVRTrackedCameraError Error = vr::VRTrackedCamera()->ReleaseVideoStreamingService(CameraHandle);
-
-		CameraHandle = INVALID_TRACKED_CAMERA_HANDLE;
 
 		if (Error != vr::VRTrackedCameraError_None)
 		{
 			UE_LOG(LogSteamVRPassthrough, Warning, TEXT("ReleaseVideoStreamingService error [%i]"), (int)Error);
 		}
 	}
+	CameraHandle = INVALID_TRACKED_CAMERA_HANDLE;
 	bHasValidFrame = false;
 }
 
@@ -909,16 +1130,8 @@ void FSteamVRPassthroughRenderer::UpdateStaticCameraParameters()
 	{
 		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("CameraFrameSize error [%i] on device Id %i"), (int)Error, HMDDeviceId);
 	}
-
-	vr::TrackedPropertyError PropError;
-		
-	FrameLayout = (vr::EVRTrackedCameraFrameLayout) vr::VRSystem()->GetInt32TrackedDeviceProperty(HMDDeviceId, vr::Prop_CameraFrameLayout_Int32, &PropError);
-
-	if (PropError != vr::TrackedProp_Success)
-	{
-		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("GetTrackedCameraEyePoses error [%i]"), (int)PropError);
-	}
-
+	
+	FrameLayout = GetFrameLayout();
 
 	RawHMDProjectionLeft = ToFMatrix(vr::VRSystem()->GetProjectionMatrix(vr::Hmd_Eye::Eye_Left, PostProcessProjectionDistanceFar * 0.1, PostProcessProjectionDistanceFar * 2.0));
 	RawHMDViewLeft = ToFMatrix(vr::VRSystem()->GetEyeToHeadTransform(vr::Hmd_Eye::Eye_Left)).Inverse();
@@ -1027,23 +1240,43 @@ void FSteamVRPassthroughRenderer::GetTrackedCameraEyePoses(FMatrix& LeftPose, FM
 
 FMatrix FSteamVRPassthroughRenderer::GetHMDRawMVPMatrix(const EStereoscopicPass Eye)
 {
-	if (GEngine == nullptr || !GEngine->XRSystem.IsValid())
+	if (!vr::VRSystem())
 	{
 		return FMatrix::Identity;
 	}
 
-	vr::EVRCompositorError Error;
-	vr::TrackedDevicePose_t HMDPose;
+	FMatrix Model;
 
-	Error = vr::VRCompositor()->GetLastPoseForTrackedDeviceIndex(HMDDeviceId, &HMDPose, nullptr);
-
-	if (Error != vr::VRCompositorError_None)
+	if (bUsingBackgroundRuntime)
 	{
-		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("GetLastPoseForTrackedDeviceIndex error [%i]"), (int)Error);
-		return FMatrix::Identity;
-	}
+		// GetLastPoseForTrackedDeviceIndex will not return a value in the proper tracking space
+		// when using OpenXR, so calculate the timing and use GetDeviceToAbsoluteTrackingPose instead.
+		float TimeRemaining = vr::VRCompositor()->GetFrameTimeRemaining();
+		float DisplayFrequency = vr::VRSystem()->GetFloatTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_DisplayFrequency_Float);
+		float FrameDuration = 1.f / DisplayFrequency;
+		float VsyncToPhotons = vr::VRSystem()->GetFloatTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_SecondsFromVsyncToPhotons_Float);
 
-	FMatrix Model = ToFMatrix(HMDPose.mDeviceToAbsoluteTracking);
+		float PredictedSecondsFromNow = FrameDuration + TimeRemaining + VsyncToPhotons;
+		vr::TrackedDevicePose_t Poses[vr::k_unMaxTrackedDeviceCount];
+
+		vr::VRSystem()->GetDeviceToAbsoluteTrackingPose(vr::ETrackingUniverseOrigin::TrackingUniverseStanding, PredictedSecondsFromNow, Poses, vr::k_unMaxTrackedDeviceCount);
+
+		Model = ToFMatrix(Poses[HMDDeviceId].mDeviceToAbsoluteTracking);
+	}
+	else
+	{
+		vr::EVRCompositorError Error;
+		vr::TrackedDevicePose_t HMDPose;
+		Error = vr::VRCompositor()->GetLastPoseForTrackedDeviceIndex(HMDDeviceId, &HMDPose, nullptr);
+
+		if (Error != vr::VRCompositorError_None)
+		{
+			UE_LOG(LogSteamVRPassthrough, Warning, TEXT("GetLastPoseForTrackedDeviceIndex error [%i]"), (int)Error);
+			return FMatrix::Identity;
+		}
+
+		Model = ToFMatrix(HMDPose.mDeviceToAbsoluteTracking);
+	}
 	Model = Model.Inverse();
 
 	if (Eye == eSSP_LEFT_EYE)
@@ -1059,7 +1292,7 @@ FMatrix FSteamVRPassthroughRenderer::GetHMDRawMVPMatrix(const EStereoscopicPass 
 
 FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraQuadTransform(const EStereoscopicPass Eye, const float ProjectionDistanceNear, const float ProjectionDistanceFar)
 {
-	bool bIsStereo = FrameLayout & vr::EVRTrackedCameraFrameLayout::EVRTrackedCameraFrameLayout_Stereo;
+	bool bIsStereo = FrameLayout != ESteamVRStereoFrameLayout::Mono;
 	uint32 CameraId = (Eye == eSSP_RIGHT_EYE && bIsStereo) ? 1 : 0;
 
 	FMatrix MVP = GetHMDRawMVPMatrix(Eye);
@@ -1079,7 +1312,7 @@ FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraQuadTransform(const EStereo
 
 FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraUVTransform(const EStereoscopicPass Eye, const float ProjectionDistance)
 {
-	bool bIsStereo = FrameLayout & vr::EVRTrackedCameraFrameLayout::EVRTrackedCameraFrameLayout_Stereo;
+	bool bIsStereo = FrameLayout != ESteamVRStereoFrameLayout::Mono;
 	uint32 CameraId = (Eye == eSSP_RIGHT_EYE && bIsStereo) ? 1 : 0;
 
 	FMatrix MVP = GetHMDRawMVPMatrix(Eye);
@@ -1126,7 +1359,7 @@ FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraUVTransform(const EStereosc
 		FPlane(H1.Z, H2.Z, H3.Z, 0),
 		FPlane(0, 0, 0, 1));
 
-	T = T.Inverse();
+	T = T.InverseFast();
 	// No transpose here since the UE4 FMatrix has a different order than the shader.
 
 	T.M[0][3] = 0;

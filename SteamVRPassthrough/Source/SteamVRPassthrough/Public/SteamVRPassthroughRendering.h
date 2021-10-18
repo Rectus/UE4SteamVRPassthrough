@@ -11,6 +11,15 @@
 
 
 UENUM()
+enum ESteamVRRuntimeStatus
+{
+	RuntimeStatus_NotRunning,
+	RuntimeStatus_AsXRSystem,
+	RuntimeStatus_InBackground
+};
+
+
+UENUM()
 enum ESteamVRTrackedCameraFrameType
 {
 	VRFrameType_Distorted = 0,
@@ -54,6 +63,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 		FName TextureParameter;
+
+	FSteamVRPassthoughTextureParameter()
+		: Instance(nullptr)
+		, TextureParameter(FName())
+	{}
 };
 
 
@@ -81,6 +95,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 StereoPass;
+
+	FSteamVRPassthoughUVTransformParameter()
+		: Instance(nullptr)
+		, MaterialParameterMatrixX(FName())
+		, MaterialParameterMatrixY(FName())
+		, MaterialParameterMatrixZ(FName())
+		, ProjectionDistance(500.0)
+		, StereoPass(0)
+	{}
 };
 
 
@@ -120,6 +143,12 @@ public:
 	}
 
 
+	static bool InitBackgroundRuntime();
+	static void ShutdownBackgroundRuntime();
+	static ESteamVRRuntimeStatus GetRuntimeStatus();
+	static bool HasCamera();
+	static ESteamVRStereoFrameLayout GetFrameLayout();
+
 	// ISceneViewExtension
 	virtual void SetupViewFamily(FSceneViewFamily& InViewFamily) override {}
 	virtual void SetupView(FSceneViewFamily& InViewFamily, FSceneView& InView) override {}
@@ -136,6 +165,8 @@ public:
 
 
 private:
+
+	static void UpdateHMDDeviceID();
 
 	void SetFramePose_RenderThread(FMatrix NewFramePose) {FramePose = NewFramePose;}
 	
@@ -179,7 +210,14 @@ private:
 
 private:
 
+	static bool bIsSteamVRRuntimeInitialized;
+	static bool bDeferredRuntimeShutdown;
+	static int HMDDeviceId;
+	
+
 	bool bIsInitialized;
+	bool bUsingBackgroundRuntime;
+
 
 	ESteamVRPostProcessPassthroughMode PostProcessMode;
 
@@ -194,13 +232,11 @@ private:
 	FMatrix RightFrameTransformNear;
 
 	FMatrix FramePose;
-
-	int HMDDeviceId;
 	
 	vr::EVRTrackedCameraFrameType FrameType;
 	vr::TrackedCameraHandle_t CameraHandle;
 	vr::CameraVideoStreamFrameHeader_t CameraFrameHeader;
-	int32 FrameLayout;
+	ESteamVRStereoFrameLayout FrameLayout;
 
 	FMatrix CameraLeftToRightPose;
 	FMatrix FrameHMDToTrackingPose;
