@@ -26,8 +26,10 @@ If using OpenXR as the XR system, SteamVR needs to be the active runtime.
 
 #### Headset compatibility ####
 
-- Valve Index - Works
-- HTC Vive - Broken, driver does not provide timing data
+- Valve Index - Supported
+- HTC Vive - Supported, driver only provides correct pose data in 60 Hz mode. 
+
+The SteamVR settings UI will misconfigure the Vive camera if the frame rate is not set the right way. To correctly set it, click the right end of the slider instead of dragging it. The USB drivers may need to be reset if the camera is incorrectly configurred.
 
 
 ### Usage ###
