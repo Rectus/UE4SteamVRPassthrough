@@ -142,7 +142,6 @@ public:
 		PostProcessProjectionDistanceNear = InDistanceNear;
 	}
 
-
 	static bool InitBackgroundRuntime();
 	static void ShutdownBackgroundRuntime();
 	static ESteamVRRuntimeStatus GetRuntimeStatus();
@@ -239,7 +238,8 @@ private:
 	ESteamVRStereoFrameLayout FrameLayout;
 
 	FMatrix CameraLeftToRightPose;
-	FMatrix FrameHMDToTrackingPose;
+	FMatrix CameraLeftToHMDPose;
+	FMatrix FrameCameraToTrackingPose;
 
 	FMatrix RawHMDProjectionLeft;
 	FMatrix RawHMDViewLeft;

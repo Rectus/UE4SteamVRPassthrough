@@ -44,6 +44,14 @@ static TAutoConsoleVariable<bool> CVarAllowBackgroundRuntime(
 );
 
 
+static TAutoConsoleVariable<float> CVarFallbackTimingOffset(
+	TEXT("vr.SteamVRPassthrough.FallbackTimingOffset"),
+	0.081f,
+	TEXT("Extra latency in seconds to add when estimating the camera pose.\n")
+	TEXT("This is only used when the camera frame is missing pose data.")
+);
+
+
 
 bool FSteamVRPassthroughRenderer::bIsSteamVRRuntimeInitialized = false;
 bool FSteamVRPassthroughRenderer::bDeferredRuntimeShutdown = false;
@@ -516,6 +524,11 @@ void FSteamVRPassthroughRenderer::PreRenderViewFamily_RenderThread(FRHICommandLi
 {
 	FScopeLock Lock(&RenderLock);
 
+	if (CameraHandle == INVALID_TRACKED_CAMERA_HANDLE || !bHasValidFrame)
+	{
+		return;
+	}
+
 	UpdateFrameTransforms();
 	UpdateTransformParameters();
 }
@@ -586,6 +599,7 @@ FSteamVRPassthroughRenderer::~FSteamVRPassthroughRenderer()
 	{
 		Shutdown();
 	}
+
 	if (bUsingBackgroundRuntime)
 	{
 		ShutdownBackgroundRuntime();
@@ -598,7 +612,7 @@ int32 FSteamVRPassthroughRenderer::GetPriority() const { return -11; }
 
 bool FSteamVRPassthroughRenderer::IsActiveThisFrame(FViewport* InViewport) const 
 { 
-	return CameraHandle != INVALID_TRACKED_CAMERA_HANDLE;
+	return (CameraHandle != INVALID_TRACKED_CAMERA_HANDLE) && bHasValidFrame;
 }
 
 
@@ -607,7 +621,7 @@ void FSteamVRPassthroughRenderer::UpdateFrameTransforms()
 {
 	SCOPE_CYCLE_COUNTER(STAT_PoseUpdate);
 
-	if (CameraHandle == INVALID_TRACKED_CAMERA_HANDLE)
+	if (CameraHandle == INVALID_TRACKED_CAMERA_HANDLE || !bHasValidFrame)
 	{
 		return;
 	}
@@ -1089,14 +1103,14 @@ void FSteamVRPassthroughRenderer::UpdateVideoStreamFrameBuffer_RenderThread()
 
 bool FSteamVRPassthroughRenderer::UpdateVideoStreamFrameHeader()
 {
-	if (!vr::VRTrackedCamera())
+	if (CameraHandle == INVALID_TRACKED_CAMERA_HANDLE || !vr::VRTrackedCamera())
 	{
 		return false;
 	}
 
 	vr::CameraVideoStreamFrameHeader_t NewFrameHeader;
 
-	vr::EVRTrackedCameraError Error = vr::VRTrackedCamera()->GetVideoStreamFrameBuffer(CameraHandle, FrameType, nullptr, 0, &NewFrameHeader, sizeof(NewFrameHeader));
+	vr::EVRTrackedCameraError Error = vr::VRTrackedCamera()->GetVideoStreamFrameBuffer(CameraHandle, FrameType, nullptr, 0, &NewFrameHeader, sizeof(vr::CameraVideoStreamFrameHeader_t));
 
 	if (Error == vr::VRTrackedCameraError_NoFrameAvailable)
 	{
@@ -1115,7 +1129,32 @@ bool FSteamVRPassthroughRenderer::UpdateVideoStreamFrameHeader()
 
 	CameraFrameHeader = NewFrameHeader;
 
-	FrameHMDToTrackingPose = ToFMatrix(CameraFrameHeader.standingTrackedDevicePose.mDeviceToAbsoluteTracking);
+	if (NewFrameHeader.standingTrackedDevicePose.bPoseIsValid)
+	{
+		// The pose in the frame header is of the left camera space to tracking space.
+		FrameCameraToTrackingPose = ToFMatrix(CameraFrameHeader.standingTrackedDevicePose.mDeviceToAbsoluteTracking);
+	}
+	else
+	{
+		static bool ErrorSeen = false;
+		if (!ErrorSeen)
+		{
+			UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Camera frame header is missing pose data, this will severely reduce frame stability!"));
+			ErrorSeen = true;
+		}
+
+		// Sync the frame timing offset to vsync for more stability.
+		float TimeRemaining = vr::VRCompositor()->GetFrameTimeRemaining();
+		float FrameDelta = TimeRemaining - CVarFallbackTimingOffset.GetValueOnRenderThread();
+	
+		vr::TrackedDevicePose_t Poses[vr::k_unMaxTrackedDeviceCount];
+
+		vr::VRSystem()->GetDeviceToAbsoluteTrackingPose(vr::ETrackingUniverseOrigin::TrackingUniverseStanding, FrameDelta, Poses, vr::k_unMaxTrackedDeviceCount);
+
+		FMatrix HMDPose = ToFMatrix(Poses[HMDDeviceId].mDeviceToAbsoluteTracking);
+
+		FrameCameraToTrackingPose = CameraLeftToHMDPose * HMDPose;
+	}
 
 	return true;
 }
@@ -1141,6 +1180,7 @@ void FSteamVRPassthroughRenderer::UpdateStaticCameraParameters()
 
 	FMatrix LeftCameraPose, RightCameraPose;
 	GetTrackedCameraEyePoses(LeftCameraPose, RightCameraPose);
+	CameraLeftToHMDPose = CopyTemp(LeftCameraPose);
 	CameraLeftToRightPose = CopyTemp(RightCameraPose * LeftCameraPose.Inverse());
 }
 
@@ -1234,13 +1274,21 @@ void FSteamVRPassthroughRenderer::GetTrackedCameraEyePoses(FMatrix& LeftPose, FM
 	}
 
 	LeftPose = ToFMatrix(Buffer[0]);
-	RightPose = ToFMatrix(Buffer[1]);
+
+	if (FrameLayout != ESteamVRStereoFrameLayout::Mono)
+	{
+		RightPose = ToFMatrix(Buffer[1]);
+	}
+	else
+	{
+		RightPose = FMatrix::Identity;
+	}
 }
 
 
 FMatrix FSteamVRPassthroughRenderer::GetHMDRawMVPMatrix(const EStereoscopicPass Eye)
 {
-	if (!vr::VRSystem())
+	if (!vr::VRSystem() || !vr::VRCompositor())
 	{
 		return FMatrix::Identity;
 	}
@@ -1301,11 +1349,11 @@ FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraQuadTransform(const EStereo
 	// The output is transposed since the UE4 FMatrix has a different order than the shader.
 	if (CameraId == 0)
 	{
-		return CopyTemp((CameraProjectionInv * FrameHMDToTrackingPose * MVP).GetTransposed());
+		return CopyTemp((CameraProjectionInv * FrameCameraToTrackingPose * MVP).GetTransposed());
 	}
 	else
 	{
-		return CopyTemp((CameraProjectionInv * CameraLeftToRightPose * FrameHMDToTrackingPose * MVP).GetTransposed());
+		return CopyTemp((CameraProjectionInv * CameraLeftToRightPose * FrameCameraToTrackingPose * MVP).GetTransposed());
 	}
 }
 
@@ -1322,11 +1370,11 @@ FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraUVTransform(const EStereosc
 
 	if (CameraId == 0)
 	{
-		TransformToCamera = CameraProjectionInv * FrameHMDToTrackingPose * MVP;
+		TransformToCamera = CameraProjectionInv * FrameCameraToTrackingPose * MVP;
 	}
 	else
 	{
-		TransformToCamera = CameraProjectionInv * CameraLeftToRightPose * FrameHMDToTrackingPose * MVP;
+		TransformToCamera = CameraProjectionInv * CameraLeftToRightPose * FrameCameraToTrackingPose * MVP;
 	}
 
 	// Calculate matrix for transforming the clip space quad to the quad output by the camera transform
