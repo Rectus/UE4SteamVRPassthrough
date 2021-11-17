@@ -40,13 +40,13 @@ public:
 
 
 	/**
-	* Initializes the SteamVR camera system and enables the passthrough.
+	* Initializes the SteamVR camera system and enables passthrough rendering.
 	*/
 	UFUNCTION(BlueprintCallable, Category = "SteamVR|Passthrough")
 		void EnableVideo();
 
 	/**
-	* Disables the passthrough.
+	* Releases the camera video stream and disables all passthrough rendering.
 	*/
 	UFUNCTION(BlueprintCallable, Category = "SteamVR|Passthrough")
 		void DisableVideo();
@@ -54,7 +54,7 @@ public:
 	/**
 	* Static function to detect if a camera is present. Will return false if no XR system is active.
 	*/
-	UFUNCTION(BlueprintPure, Category = "SteamVR|Passthrough")
+	UFUNCTION(BlueprintCallable, Category = "SteamVR|Passthrough")
 		static bool HasCamera();
 
 	/**

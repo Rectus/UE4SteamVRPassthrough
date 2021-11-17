@@ -585,7 +585,12 @@ FSteamVRPassthroughRenderer::FSteamVRPassthroughRenderer(const FAutoRegister& Au
 	LeftCameraMatrixCache = MakeUnique<TMap<FVector2D, FMatrix>>();
 	RightCameraMatrixCache = MakeUnique<TMap<FVector2D, FMatrix>>();
 
+#if PLATFORM_WINDOWS
 	bUseSharedCameraTexture = FHardwareInfo::GetHardwareInfo(NAME_RHI) == "D3D11" ? bInUseSharedCameraTexture : false;
+#else
+	bUseSharedCameraTexture = false;
+#endif //PLATFORM_WINDOWS
+
 	PostProcessMaterial = nullptr;
 	PostProcessMaterialTemp = nullptr;
 	bIsInitialized = false;
@@ -653,6 +658,12 @@ bool FSteamVRPassthroughRenderer::Initialize()
 	if (bIsInitialized)
 	{
 		return true;
+	}
+
+	if (!FSteamVRPassthroughModule::IsOpenVRLoaded())
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Attempted to enable passthrough rendering, but the OpenVR library is not loaded."));
+		return false;
 	}
 
 	if (!GEngine)
@@ -929,6 +940,11 @@ ESteamVRRuntimeStatus FSteamVRPassthroughRenderer::GetRuntimeStatus()
 
 bool FSteamVRPassthroughRenderer::HasCamera()
 {
+	if (!FSteamVRPassthroughModule::IsOpenVRLoaded())
+	{
+		return false;
+	}
+
 	ESteamVRRuntimeStatus Status = FSteamVRPassthroughRenderer::GetRuntimeStatus();
 
 	if (Status == RuntimeStatus_NotRunning)

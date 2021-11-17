@@ -12,8 +12,10 @@
 #define INTEL_METRICSDISCOVERY 0
 #endif
 
+#if PLATFORM_WINDOWS
 #include "D3D11RHI/Private/D3D11RHIPrivate.h"
 #include "D3D11Util.h"
+#endif //PLATFORM_WINDOWS
 
 struct ID3D11Texture2D;
 struct ID3D11ShaderResourceView;
@@ -55,6 +57,8 @@ FTextureResource* USteamVRExternalTexture2D::CreateResource()
 
 bool USteamVRExternalTexture2D::UpdateTextureReference(vr::TrackedCameraHandle_t CameraHandle, vr::EVRTrackedCameraFrameType FrameType)
 {
+#if PLATFORM_WINDOWS
+
 	if (Resource == nullptr)
 	{
 		return false;
@@ -76,6 +80,10 @@ bool USteamVRExternalTexture2D::UpdateTextureReference(vr::TrackedCameraHandle_t
 	((FSteamVRExternalTextureResource*) Resource)->UpdateTextureSRV(CameraTextureRes);
 
 	return true;
+
+#else
+	return false;
+#endif //PLATFORM_WINDOWS
 }
 
 

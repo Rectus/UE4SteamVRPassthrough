@@ -20,6 +20,8 @@ Any feedback or issue reports are appreciated.
 
 UE4 version 4.26 or 4.27 (the example project only supports 4.27).
 
+Windows or Linux (Linux support not tested).
+
 SteamVR with a headset that exposes the passthrough camera images. Most Vive headsets and the Valve Index can do this. Oculus and WMR headsets are NOT supported.
 
 If using OpenXR as the XR system, SteamVR needs to be the active runtime.
