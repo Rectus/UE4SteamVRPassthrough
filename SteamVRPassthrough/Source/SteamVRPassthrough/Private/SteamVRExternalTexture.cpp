@@ -28,6 +28,8 @@ USteamVRExternalTexture2D::USteamVRExternalTexture2D(const FObjectInitializer& O
 
 USteamVRExternalTexture2D* USteamVRExternalTexture2D::Create(int32 InSizeX, int32 InSizeY)
 {
+	check(InSizeX > 0 && InSizeY > 0);
+
 	auto NewTexture = NewObject<USteamVRExternalTexture2D>(GetTransientPackage(), NAME_None, RF_Transient);
 
 	NewTexture->Filter = TF_Bilinear;
@@ -74,7 +76,7 @@ bool USteamVRExternalTexture2D::UpdateTextureReference(vr::TrackedCameraHandle_t
 	if (Error != vr::VRTrackedCameraError_None)
 	{
 		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("GetVideoStreamTextureD3D11 error [%i]"), (int)Error);
-		return false ;
+		return false;
 	}
 
 	((FSteamVRExternalTextureResource*) Resource)->UpdateTextureSRV(CameraTextureRes);

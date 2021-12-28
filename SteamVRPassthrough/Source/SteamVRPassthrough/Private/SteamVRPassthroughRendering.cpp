@@ -710,7 +710,10 @@ bool FSteamVRPassthroughRenderer::Initialize()
 		return false;
 	}
 
-	UpdateStaticCameraParameters();
+	if (!UpdateStaticCameraParameters())
+	{
+		return false;
+	}
 
 	if (bUseSharedCameraTexture)
 	{
@@ -1176,7 +1179,7 @@ bool FSteamVRPassthroughRenderer::UpdateVideoStreamFrameHeader()
 }
 
 
-void FSteamVRPassthroughRenderer::UpdateStaticCameraParameters()
+bool FSteamVRPassthroughRenderer::UpdateStaticCameraParameters()
 {
 
 	vr::EVRTrackedCameraError Error = vr::VRTrackedCamera()->GetCameraFrameSize(HMDDeviceId, FrameType, &CameraTextureWidth, &CameraTextureHeight, &CameraFrameBufferSize);
@@ -1184,6 +1187,13 @@ void FSteamVRPassthroughRenderer::UpdateStaticCameraParameters()
 	if (Error != vr::VRTrackedCameraError_None)
 	{
 		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("CameraFrameSize error [%i] on device Id %i"), (int)Error, HMDDeviceId);
+		return false;
+	}
+
+	if (CameraTextureWidth == 0 || CameraTextureHeight == 0 || CameraFrameBufferSize == 0)
+	{
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Invalid frame size received:Width = %u, Height = %u, Size = %u"), CameraTextureWidth, CameraTextureHeight, CameraFrameBufferSize);
+		return false;
 	}
 	
 	FrameLayout = GetFrameLayout();
@@ -1198,6 +1208,8 @@ void FSteamVRPassthroughRenderer::UpdateStaticCameraParameters()
 	GetTrackedCameraEyePoses(LeftCameraPose, RightCameraPose);
 	CameraLeftToHMDPose = CopyTemp(LeftCameraPose);
 	CameraLeftToRightPose = CopyTemp(RightCameraPose * LeftCameraPose.Inverse());
+
+	return true;
 }
 
 

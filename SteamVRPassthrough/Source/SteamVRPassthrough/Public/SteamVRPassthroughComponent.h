@@ -41,9 +41,11 @@ public:
 
 	/**
 	* Initializes the SteamVR camera system and enables passthrough rendering.
+	* 
+	* @return True if initialization was successful.
 	*/
 	UFUNCTION(BlueprintCallable, Category = "SteamVR|Passthrough")
-		void EnableVideo();
+		bool EnableVideo();
 
 	/**
 	* Releases the camera video stream and disables all passthrough rendering.

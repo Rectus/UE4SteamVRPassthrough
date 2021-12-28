@@ -56,11 +56,11 @@ void USteamVRPassthroughComponent::TickComponent(float DeltaTime, ELevelTick Tic
 }
 
 
-void USteamVRPassthroughComponent::EnableVideo()
+bool USteamVRPassthroughComponent::EnableVideo()
 {
 	if (bEnabled)
 	{
-		return;
+		return true;
 	}
 
 	if (!PassthroughRenderer.IsValid())
@@ -99,11 +99,15 @@ void USteamVRPassthroughComponent::EnableVideo()
 		bEnabled = true;
 		PrimaryComponentTick.SetTickFunctionEnable(true);
 		OnVideoEnabled.Broadcast();
+
+		return true;
 	}
 	else
 	{
 		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Error enabling passthrough video!"));
 		PassthroughRenderer.Reset();
+
+		return false;
 	}
 }
 

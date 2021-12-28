@@ -184,7 +184,7 @@ private:
 
 	bool UpdateVideoStreamFrameHeader();
 
-	void UpdateStaticCameraParameters();
+	bool UpdateStaticCameraParameters();
 
 	void UpdateTransformParameters();
 
