@@ -78,6 +78,48 @@ FORCEINLINE FMatrix ToFMatrix(const vr::HmdMatrix44_t& tm)
 }
 
 
+FORCEINLINE FVector2D GetFrameUVOffset(const EStereoscopicPass StereoPass, const ESteamVRStereoFrameLayout FrameLayout)
+{
+	if (StereoPass == EStereoscopicPass::eSSP_LEFT_EYE)
+	{
+		switch (FrameLayout)
+		{
+		case ESteamVRStereoFrameLayout::StereoHorizontalLayout:
+			return FVector2D(0, 0);
+			break;
+
+		// The vertical layout has left camera below the right
+		case ESteamVRStereoFrameLayout::StereoVerticalLayout:
+			return FVector2D(0, 0.5);
+			break;
+
+		case ESteamVRStereoFrameLayout::Mono:
+			return FVector2D(0, 0);
+			break;
+		}	
+	}
+	else
+	{
+		switch (FrameLayout)
+		{
+		case ESteamVRStereoFrameLayout::StereoHorizontalLayout:
+			return FVector2D(0.5, 0);
+			break;
+
+		case ESteamVRStereoFrameLayout::StereoVerticalLayout:
+			return FVector2D(0, 0);
+			break;
+
+		case ESteamVRStereoFrameLayout::Mono:
+			return FVector2D(0, 0);
+			break;
+		}
+	}
+
+	return FVector2D(0, 0);
+}
+
+
 class FPassthroughFullsceenVS : public FGlobalShader
 {
 public:
@@ -111,6 +153,7 @@ public:
 
 IMPLEMENT_GLOBAL_SHADER(FPassthroughFullsceenVS, "/Plugin/SteamVRPassthrough/Private/PassthroughFullsceen.usf", "MainVS", SF_Vertex)
 IMPLEMENT_GLOBAL_SHADER(FPassthroughFullsceenPS, "/Plugin/SteamVRPassthrough/Private/PassthroughFullsceen.usf", "MainPS", SF_Pixel)
+
 
 
 FScreenPassTexture FSteamVRPassthroughRenderer::DrawFullscreenPassthrough_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessMaterialInputs& Inputs)
@@ -157,28 +200,15 @@ FScreenPassTexture FSteamVRPassthroughRenderer::DrawFullscreenPassthrough_Render
 	{
 		VSPassParameters->FrameTransformMatrixFar = LeftFrameTransformFar;
 		//VSPassParameters->FrameTransformMatrixNear = LeftFrameTransformNear;
-		PSPassParameters->FrameUVOffset = FVector2D(0, 0);
+
 	}
 	else
 	{
 		VSPassParameters->FrameTransformMatrixFar = RightFrameTransformFar;
 		//VSPassParameters->FrameTransformMatrixNear = RightFrameTransformNear;
-
-		switch (FrameLayout)
-		{
-			case ESteamVRStereoFrameLayout::StereoHorizontalLayout:
-				PSPassParameters->FrameUVOffset = FVector2D(0.5, 0);
-				break;
-
-			case ESteamVRStereoFrameLayout::StereoVerticalLayout:
-				PSPassParameters->FrameUVOffset = FVector2D(0, 0.5);
-				break;
-
-			case ESteamVRStereoFrameLayout::Mono:
-				PSPassParameters->FrameUVOffset = FVector2D(0, 0);
-				break;
-		}
 	}
+
+	PSPassParameters->FrameUVOffset = GetFrameUVOffset(View.StereoPass, FrameLayout);
 
 	FScreenPassPipelineState PipelineState;
 	if (StencilTestValue < 0)
@@ -469,28 +499,14 @@ FScreenPassTexture FSteamVRPassthroughRenderer::DrawPostProcessMatPassthrough_Re
 	{
 		PassParameters->FrameTransformMatrixFar = LeftFrameTransformFar;
 		PassParameters->FrameTransformMatrixNear = LeftFrameTransformNear;
-		PassParameters->FrameUVOffset = FVector2D(0, 0);
 	}
 	else
 	{
 		PassParameters->FrameTransformMatrixFar = RightFrameTransformFar;
 		PassParameters->FrameTransformMatrixNear = RightFrameTransformNear;
-
-		switch (FrameLayout)
-		{
-			case ESteamVRStereoFrameLayout::StereoHorizontalLayout:
-				PassParameters->FrameUVOffset = FVector2D(0.5, 0);
-				break;
-
-			case ESteamVRStereoFrameLayout::StereoVerticalLayout:
-				PassParameters->FrameUVOffset = FVector2D(0, 0.5);
-				break;
-
-			case ESteamVRStereoFrameLayout::Mono:
-				PassParameters->FrameUVOffset = FVector2D(0, 0);
-				break;
-		}
 	}
+
+	PassParameters->FrameUVOffset = GetFrameUVOffset(View.StereoPass, FrameLayout);
 
 	ClearUnusedGraphResources(VertexShader, PixelShader, PassParameters);
 
@@ -1205,7 +1221,10 @@ bool FSteamVRPassthroughRenderer::UpdateStaticCameraParameters()
 	RawHMDViewRight = ToFMatrix(vr::VRSystem()->GetEyeToHeadTransform(vr::Hmd_Eye::Eye_Right)).Inverse();
 
 	FMatrix LeftCameraPose, RightCameraPose;
-	GetTrackedCameraEyePoses(LeftCameraPose, RightCameraPose);
+	if (!GetTrackedCameraEyePoses(LeftCameraPose, RightCameraPose))
+	{
+		return false;
+	}
 	CameraLeftToHMDPose = CopyTemp(LeftCameraPose);
 	CameraLeftToRightPose = CopyTemp(RightCameraPose * LeftCameraPose.Inverse());
 
@@ -1283,22 +1302,27 @@ FMatrix FSteamVRPassthroughRenderer::GetCameraProjectionInv(const uint32 CameraI
 }
 
 
-void FSteamVRPassthroughRenderer::GetTrackedCameraEyePoses(FMatrix& LeftPose, FMatrix& RightPose)
+bool FSteamVRPassthroughRenderer::GetTrackedCameraEyePoses(FMatrix& LeftPose, FMatrix& RightPose)
 {
 	if (!vr::VRSystem())
 	{
-		return;
+		return false;
 	}
 
 	vr::HmdMatrix34_t Buffer[2];
 	vr::TrackedPropertyError Error;
+	bool bGotLeftCamera = true;
+	bool bGotRightCamera = true;
 
-	vr::VRSystem()->GetArrayTrackedDeviceProperty(HMDDeviceId, vr::Prop_CameraToHeadTransforms_Matrix34_Array, vr::k_unHmdMatrix34PropertyTag, &Buffer, sizeof(Buffer), &Error);
+	uint32_t NumBytes = vr::VRSystem()->GetArrayTrackedDeviceProperty(HMDDeviceId, vr::Prop_CameraToHeadTransforms_Matrix34_Array, vr::k_unHmdMatrix34PropertyTag, &Buffer, sizeof(Buffer), &Error);
 
-	if (Error != vr::TrackedProp_Success)
+	check(NumBytes <= sizeof(Buffer));
+
+	if (Error != vr::TrackedProp_Success || NumBytes == 0)
 	{
-		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("GetTrackedCameraEyePoses error [%i]"), (int)Error);
-		return;
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Failed to get tracked camera pose array, error [%i]"), (int)Error);
+		bGotLeftCamera = false;
+		bGotRightCamera = false;
 	}
 
 	LeftPose = ToFMatrix(Buffer[0]);
@@ -1311,6 +1335,54 @@ void FSteamVRPassthroughRenderer::GetTrackedCameraEyePoses(FMatrix& LeftPose, FM
 	{
 		RightPose = FMatrix::Identity;
 	}
+
+	// The matrix is only a valid transformation matrix if the determinant is non-zero.
+	if (LeftPose == FMatrix::Identity || LeftPose.Determinant() == 0)
+	{
+		bGotLeftCamera = false;
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Invalid left camera pose received"));
+	}
+
+	if (FrameLayout != ESteamVRStereoFrameLayout::Mono && (RightPose == FMatrix::Identity || RightPose.Determinant() == 0))
+	{
+		bGotRightCamera = false;
+		UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Invalid right camera pose received"));
+	}
+
+	if (!bGotLeftCamera)
+	{
+		vr::HmdMatrix34_t Matrix = vr::VRSystem()->GetMatrix34TrackedDeviceProperty(HMDDeviceId, vr::Prop_CameraToHeadTransform_Matrix34, &Error);
+
+		LeftPose = ToFMatrix(Matrix);
+
+		if (Error != vr::TrackedProp_Success || LeftPose == FMatrix::Identity || LeftPose.Determinant() == 0)
+		{
+			LeftPose == FMatrix::Identity;
+			RightPose == FMatrix::Identity;
+
+			if (FrameLayout == ESteamVRStereoFrameLayout::Mono)
+			{
+				// The mono layout does not need the camra pose unless the frame header as missing data, 
+				// such as with the HTC Vive on 30 Hz.
+				UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Failed to get tracked camera pose from SteamVR: [%i], ignoring"), (int)Error);		
+				return true;
+			}
+			else
+			{
+				UE_LOG(LogSteamVRPassthrough, Error, TEXT("Failed to get tracked camera pose from SteamVR: [%i]"), (int)Error);
+				return false;
+			}
+		}
+	}
+
+	if (!bGotRightCamera)
+	{
+		// Approximate right eye by mirroring across x-axis
+		RightPose = FMatrix(LeftPose);
+		RightPose.Mirror(EAxis::X, EAxis::X);
+	}
+
+	return true;
 }
 
 

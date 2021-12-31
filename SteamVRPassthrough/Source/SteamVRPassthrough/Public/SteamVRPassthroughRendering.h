@@ -191,7 +191,7 @@ private:
 	void GetCameraIntrinsics(const uint32 CameraId, FVector2D& FocalLength, FVector2D& Center);
 	FMatrix GetCameraProjection(const uint32 CameraId, const float ZNear, const float ZFar);
 	FMatrix GetCameraProjectionInv(const uint32 CameraId, const float ZNear, const float ZFar);
-	void GetTrackedCameraEyePoses(FMatrix& LeftPose, FMatrix& RightPose);
+	bool GetTrackedCameraEyePoses(FMatrix& LeftPose, FMatrix& RightPose);
 	FMatrix GetHMDRawMVPMatrix(const EStereoscopicPass Eye);
 	
 	/**
