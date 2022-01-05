@@ -1324,15 +1324,25 @@ bool FSteamVRPassthroughRenderer::GetTrackedCameraEyePoses(FMatrix& LeftPose, FM
 		bGotLeftCamera = false;
 		bGotRightCamera = false;
 	}
-
-	LeftPose = ToFMatrix(Buffer[0]);
-
-	if (FrameLayout != ESteamVRStereoFrameLayout::Mono)
+	
+	if (FrameLayout == ESteamVRStereoFrameLayout::StereoHorizontalLayout)
 	{
+		LeftPose = ToFMatrix(Buffer[0]);
 		RightPose = ToFMatrix(Buffer[1]);
+	}
+	else if (FrameLayout == ESteamVRStereoFrameLayout::StereoVerticalLayout)
+	{
+		// Vertical layouts have the right camera at index 0.
+		LeftPose = ToFMatrix(Buffer[1]);
+		RightPose = ToFMatrix(Buffer[0]);
+
+		// Hack to remove scaling from Vive Pro Eye matrix (why is it even there?).
+		LeftPose.M[1][1] = FMath::Abs(LeftPose.M[1][1]);
+		LeftPose.M[2][2] = FMath::Abs(LeftPose.M[2][2]);
 	}
 	else
 	{
+		LeftPose = ToFMatrix(Buffer[0]);
 		RightPose = FMatrix::Identity;
 	}
 
@@ -1362,7 +1372,7 @@ bool FSteamVRPassthroughRenderer::GetTrackedCameraEyePoses(FMatrix& LeftPose, FM
 
 			if (FrameLayout == ESteamVRStereoFrameLayout::Mono)
 			{
-				// The mono layout does not need the camra pose unless the frame header as missing data, 
+				// The mono layout does not need the camra pose unless the frame header has missing data, 
 				// such as with the HTC Vive on 30 Hz.
 				UE_LOG(LogSteamVRPassthrough, Warning, TEXT("Failed to get tracked camera pose from SteamVR: [%i], ignoring"), (int)Error);		
 				return true;
