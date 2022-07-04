@@ -21,6 +21,7 @@
 #include "MaterialShaderType.h"
 #include "MaterialShader.h"
 #include "HardwareInfo.h"
+#include "RenderGraphUtils.h"
 #include "SceneTextureParameters.h"
 #include "IXRTrackingSystem.h"
 
@@ -77,10 +78,16 @@ FORCEINLINE FMatrix ToFMatrix(const vr::HmdMatrix44_t& tm)
 		FPlane(tm.m[0][3], tm.m[1][3], tm.m[2][3], tm.m[3][3]));
 }
 
-
-FORCEINLINE FVector2D GetFrameUVOffset(const EStereoscopicPass StereoPass, const ESteamVRStereoFrameLayout FrameLayout)
+FORCEINLINE EStereoscopicEye GetStereoscopicEyeFromIndex(const int32 StereoViewIndex)
 {
-	if (StereoPass == EStereoscopicPass::eSSP_LEFT_EYE)
+	if (StereoViewIndex != 0 || StereoViewIndex != 1)
+		return EStereoscopicEye::eSSE_MONOSCOPIC;
+	return static_cast<EStereoscopicEye>(StereoViewIndex);
+}
+
+FORCEINLINE FVector2D GetFrameUVOffset(const EStereoscopicEye StereoPass, const ESteamVRStereoFrameLayout FrameLayout)
+{
+	if (StereoPass == EStereoscopicEye::eSSE_LEFT_EYE)
 	{
 		switch (FrameLayout)
 		{
@@ -128,7 +135,7 @@ public:
 	SHADER_USE_PARAMETER_STRUCT_WITH_LEGACY_BASE(FPassthroughFullsceenVS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER(FMatrix, FrameTransformMatrixFar)
+		SHADER_PARAMETER(FMatrix44f, FrameTransformMatrixFar)
 		//SHADER_PARAMETER(FMatrix, FrameTransformMatrixNear)
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 	END_SHADER_PARAMETER_STRUCT()
@@ -145,7 +152,7 @@ public:
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		SHADER_PARAMETER_TEXTURE(FTexture2D, CameraTexture)
 		SHADER_PARAMETER_SAMPLER(SamplerState, CameraTextureSampler)
-		SHADER_PARAMETER(FVector2D, FrameUVOffset)
+		SHADER_PARAMETER(FVector2f, FrameUVOffset)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 };
@@ -196,19 +203,20 @@ FScreenPassTexture FSteamVRPassthroughRenderer::DrawFullscreenPassthrough_Render
 		
 	VSPassParameters->View = View.ViewUniformBuffer;
 
-	if (View.StereoPass == EStereoscopicPass::eSSP_LEFT_EYE)
+	if (GetStereoscopicEyeFromIndex(View.StereoViewIndex) == EStereoscopicEye::eSSE_LEFT_EYE)
 	{
-		VSPassParameters->FrameTransformMatrixFar = LeftFrameTransformFar;
+		VSPassParameters->FrameTransformMatrixFar = FMatrix44f(LeftFrameTransformFar);
 		//VSPassParameters->FrameTransformMatrixNear = LeftFrameTransformNear;
 
 	}
 	else
 	{
-		VSPassParameters->FrameTransformMatrixFar = RightFrameTransformFar;
+		VSPassParameters->FrameTransformMatrixFar = FMatrix44f(RightFrameTransformFar);
 		//VSPassParameters->FrameTransformMatrixNear = RightFrameTransformNear;
 	}
 
-	PSPassParameters->FrameUVOffset = GetFrameUVOffset(View.StereoPass, FrameLayout);
+	PSPassParameters->FrameUVOffset = FVector2f(GetFrameUVOffset(
+		GetStereoscopicEyeFromIndex(View.StereoViewIndex), FrameLayout));
 
 	FScreenPassPipelineState PipelineState;
 	if (StencilTestValue < 0)
@@ -264,9 +272,9 @@ BEGIN_SHADER_PARAMETER_STRUCT(FPassthroughPostProcessMatParameters, )
 	SHADER_PARAMETER(uint32, bMetalMSAAHDRDecode)
 	RENDER_TARGET_BINDING_SLOTS()
 
-	SHADER_PARAMETER(FMatrix, FrameTransformMatrixFar)
-	SHADER_PARAMETER(FMatrix, FrameTransformMatrixNear)
-	SHADER_PARAMETER(FVector2D, FrameUVOffset)
+	SHADER_PARAMETER(FMatrix44f, FrameTransformMatrixFar)
+	SHADER_PARAMETER(FMatrix44f, FrameTransformMatrixNear)
+	SHADER_PARAMETER(FVector2f, FrameUVOffset)
 END_SHADER_PARAMETER_STRUCT()
 
 
@@ -378,7 +386,6 @@ FRHIBlendState* GetMaterialBlendState(const FMaterial* Material)
 }
 
 
-
 FScreenPassTexture FSteamVRPassthroughRenderer::DrawPostProcessMatPassthrough_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessMaterialInputs& Inputs)
 {
 	FScopeLock Lock(&RenderLock);
@@ -476,7 +483,10 @@ FScreenPassTexture FSteamVRPassthroughRenderer::DrawPostProcessMatPassthrough_Re
 			FExclusiveDepthStencil::DepthRead_StencilRead);
 	}
 
-	const FScreenPassTexture BlackDummy(RegisterExternalOrPassthroughTexture(&GraphBuilder, GSystemTextures.BlackDummy));
+	// GraphBuilder is supposedly always valid AND removed function executes code below if valid
+	// auto Tex = RegisterExternalOrPassthroughTexture(&GraphBuilder, GSystemTextures.BlackDummy);
+	auto Tex = GraphBuilder.RegisterExternalTexture(GSystemTextures.BlackDummy, ERDGTextureFlags::None);
+	const FScreenPassTexture BlackDummy(Tex);
 
 	GraphBuilder.RemoveUnusedTextureWarning(BlackDummy.Texture);
 
@@ -494,19 +504,20 @@ FScreenPassTexture FSteamVRPassthroughRenderer::DrawPostProcessMatPassthrough_Re
 		PassParameters->PostProcessInput[InputIndex] = GetScreenPassTextureInput(Input, PointClampSampler);
 	}
 
-	
-	if (View.StereoPass == EStereoscopicPass::eSSP_LEFT_EYE)
+
+	if (GetStereoscopicEyeFromIndex(View.StereoViewIndex) == EStereoscopicEye::eSSE_LEFT_EYE)
 	{
-		PassParameters->FrameTransformMatrixFar = LeftFrameTransformFar;
-		PassParameters->FrameTransformMatrixNear = LeftFrameTransformNear;
+		PassParameters->FrameTransformMatrixFar = FMatrix44f(LeftFrameTransformFar);
+		PassParameters->FrameTransformMatrixNear = FMatrix44f(LeftFrameTransformNear);
 	}
 	else
 	{
-		PassParameters->FrameTransformMatrixFar = RightFrameTransformFar;
-		PassParameters->FrameTransformMatrixNear = RightFrameTransformNear;
+		PassParameters->FrameTransformMatrixFar = FMatrix44f(RightFrameTransformFar);
+		PassParameters->FrameTransformMatrixNear = FMatrix44f(RightFrameTransformNear);
 	}
 
-	PassParameters->FrameUVOffset = GetFrameUVOffset(View.StereoPass, FrameLayout);
+	PassParameters->FrameUVOffset = FVector2f(GetFrameUVOffset(
+		GetStereoscopicEyeFromIndex(View.StereoViewIndex), FrameLayout));
 
 	ClearUnusedGraphResources(VertexShader, PixelShader, PassParameters);
 
@@ -647,8 +658,8 @@ void FSteamVRPassthroughRenderer::UpdateFrameTransforms()
 		return;
 	}
 
-	LeftFrameTransformFar = GetTrackedCameraUVTransform(eSSP_LEFT_EYE, PostProcessProjectionDistanceFar);
-	RightFrameTransformFar = GetTrackedCameraUVTransform(eSSP_RIGHT_EYE, PostProcessProjectionDistanceFar);
+	LeftFrameTransformFar = GetTrackedCameraUVTransform(eSSE_LEFT_EYE, PostProcessProjectionDistanceFar);
+	RightFrameTransformFar = GetTrackedCameraUVTransform(eSSE_RIGHT_EYE, PostProcessProjectionDistanceFar);
 
 	if (FMath::IsNearlyEqual(PostProcessProjectionDistanceFar, PostProcessProjectionDistanceNear))
 	{
@@ -657,8 +668,8 @@ void FSteamVRPassthroughRenderer::UpdateFrameTransforms()
 	}
 	else
 	{
-		LeftFrameTransformNear = GetTrackedCameraUVTransform(eSSP_LEFT_EYE, PostProcessProjectionDistanceNear);
-		RightFrameTransformNear = GetTrackedCameraUVTransform(eSSP_RIGHT_EYE, PostProcessProjectionDistanceNear);
+		LeftFrameTransformNear = GetTrackedCameraUVTransform(eSSE_LEFT_EYE, PostProcessProjectionDistanceNear);
+		RightFrameTransformNear = GetTrackedCameraUVTransform(eSSE_RIGHT_EYE, PostProcessProjectionDistanceNear);
 	}
 }
 
@@ -1396,7 +1407,7 @@ bool FSteamVRPassthroughRenderer::GetTrackedCameraEyePoses(FMatrix& LeftPose, FM
 }
 
 
-FMatrix FSteamVRPassthroughRenderer::GetHMDRawMVPMatrix(const EStereoscopicPass Eye)
+FMatrix FSteamVRPassthroughRenderer::GetHMDRawMVPMatrix(const EStereoscopicEye Eye)
 {
 	if (!vr::VRSystem() || !vr::VRCompositor())
 	{
@@ -1437,7 +1448,7 @@ FMatrix FSteamVRPassthroughRenderer::GetHMDRawMVPMatrix(const EStereoscopicPass 
 	}
 	Model = Model.Inverse();
 
-	if (Eye == eSSP_LEFT_EYE)
+	if (Eye == eSSE_LEFT_EYE)
 	{
 		return CopyTemp(Model * RawHMDViewLeft * RawHMDProjectionLeft);
 	}
@@ -1448,10 +1459,10 @@ FMatrix FSteamVRPassthroughRenderer::GetHMDRawMVPMatrix(const EStereoscopicPass 
 }
 
 
-FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraQuadTransform(const EStereoscopicPass Eye, const float ProjectionDistanceNear, const float ProjectionDistanceFar)
+FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraQuadTransform(const EStereoscopicEye Eye, const float ProjectionDistanceNear, const float ProjectionDistanceFar)
 {
 	bool bIsStereo = FrameLayout != ESteamVRStereoFrameLayout::Mono;
-	uint32 CameraId = (Eye == eSSP_RIGHT_EYE && bIsStereo) ? 1 : 0;
+	uint32 CameraId = (Eye == eSSE_RIGHT_EYE && bIsStereo) ? 1 : 0;
 
 	FMatrix MVP = GetHMDRawMVPMatrix(Eye);
 	FMatrix CameraProjectionInv = GetCameraProjectionInv(CameraId, ProjectionDistanceNear, ProjectionDistanceFar);
@@ -1468,10 +1479,10 @@ FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraQuadTransform(const EStereo
 }
 
 
-FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraUVTransform(const EStereoscopicPass Eye, const float ProjectionDistance)
+FMatrix FSteamVRPassthroughRenderer::GetTrackedCameraUVTransform(const EStereoscopicEye Eye, const float ProjectionDistance)
 {
 	bool bIsStereo = FrameLayout != ESteamVRStereoFrameLayout::Mono;
-	uint32 CameraId = (Eye == eSSP_RIGHT_EYE && bIsStereo) ? 1 : 0;
+	uint32 CameraId = (Eye == eSSE_RIGHT_EYE && bIsStereo) ? 1 : 0;
 
 	FMatrix MVP = GetHMDRawMVPMatrix(Eye);
 	FMatrix CameraProjectionInv = GetCameraProjectionInv(CameraId, ProjectionDistance * 0.5, ProjectionDistance);
@@ -1574,7 +1585,7 @@ void FSteamVRPassthroughRenderer::UpdateTransformParameters()
 		{
 			continue;
 		}
-		EStereoscopicPass Eye = ParameterStruct.StereoPass == 0 ? eSSP_LEFT_EYE : eSSP_RIGHT_EYE;
+		EStereoscopicEye Eye = ParameterStruct.StereoPass == 0 ? eSSE_LEFT_EYE : eSSE_RIGHT_EYE;
 
 		FMatrix Transform = GetTrackedCameraUVTransform(Eye, ParameterStruct.ProjectionDistance);
 

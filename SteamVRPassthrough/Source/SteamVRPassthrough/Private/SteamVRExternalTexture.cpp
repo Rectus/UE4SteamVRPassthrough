@@ -117,7 +117,7 @@ void FSteamVRExternalTextureResource::InitRHI()
 		Flags |= TexCreate_SRGB;
 	}
 
-	FRHIResourceCreateInfo CreateInfo;
+	FRHIResourceCreateInfo CreateInfo(TEXT("FSteamVRExternalTextureResource::InitRHI"));
 	Texture2DRHI = RHICreateTexture2D(GetSizeX(), GetSizeY(), Owner->Format, Owner->NumMips, 1, Flags, CreateInfo);
 
 

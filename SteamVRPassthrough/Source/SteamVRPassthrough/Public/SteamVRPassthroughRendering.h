@@ -192,20 +192,20 @@ private:
 	FMatrix GetCameraProjection(const uint32 CameraId, const float ZNear, const float ZFar);
 	FMatrix GetCameraProjectionInv(const uint32 CameraId, const float ZNear, const float ZFar);
 	bool GetTrackedCameraEyePoses(FMatrix& LeftPose, FMatrix& RightPose);
-	FMatrix GetHMDRawMVPMatrix(const EStereoscopicPass Eye);
+	FMatrix GetHMDRawMVPMatrix(const EStereoscopicEye Eye);
 	
 	/**
 	 * Returns a matrix that can transform a [-1 to 1] screenspace quad with the camera frame UV mapped it, 
 	 * so that the frame is correctly projected for the view. The right eye UVs need to be shifted by 0.5 horizontally.
 	 */
-	FMatrix GetTrackedCameraQuadTransform(const EStereoscopicPass Eye, const float ProjectionDistanceNear, const float ProjectionDistanceFar);
+	FMatrix GetTrackedCameraQuadTransform(const EStereoscopicEye Eye, const float ProjectionDistanceNear, const float ProjectionDistanceFar);
 
 	/**
 	 * Returns a 3x3 matrix that transforms the screenspace UVs for the camera frame.
 	 * Since the transformation is non-linear in R2, if done in the vertex shader, 
 	 * the output Uvs will need to be passed as homogenous coordinates to the fragment shader.
 	 */
-	FMatrix GetTrackedCameraUVTransform(const EStereoscopicPass Eye, const float ProjectionDistance);
+	FMatrix GetTrackedCameraUVTransform(const EStereoscopicEye Eye, const float ProjectionDistance);
 
 private:
 
