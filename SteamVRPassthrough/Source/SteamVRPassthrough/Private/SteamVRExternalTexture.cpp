@@ -61,13 +61,15 @@ bool USteamVRExternalTexture2D::UpdateTextureReference(vr::TrackedCameraHandle_t
 {
 #if PLATFORM_WINDOWS
 
-	if (Resource == nullptr)
+	FTextureResource* ResPtr = GetResource();
+
+	if (ResPtr == nullptr)
 	{
 		return false;
 	}
 
 	//ID3D11Texture2D*
-	void* TextureRes = Resource->GetTexture2DRHI()->GetNativeResource();
+	void* TextureRes = ResPtr->GetTexture2DRHI()->GetNativeResource();
 
 	//ID3D11ShaderResourceView**
 	void** CameraTextureRes = nullptr;
@@ -79,7 +81,7 @@ bool USteamVRExternalTexture2D::UpdateTextureReference(vr::TrackedCameraHandle_t
 		return false;
 	}
 
-	((FSteamVRExternalTextureResource*) Resource)->UpdateTextureSRV(CameraTextureRes);
+	((FSteamVRExternalTextureResource*) ResPtr)->UpdateTextureSRV(CameraTextureRes);
 
 	return true;
 

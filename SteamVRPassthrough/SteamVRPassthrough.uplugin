@@ -15,7 +15,6 @@
 	"IsBetaVersion": true,
 	"Installed": false,
 	"SupportedTargetPlatforms": [
-		"Win32",
 		"Win64"
 	],
 	"Modules": [

@@ -46,7 +46,7 @@ UENUM(BlueprintType)
 enum ESteamVRStereoFrameLayout
 {
 	Mono = 0,
-	StereoVerticalLayout = 1, // Stereo frames are Top/Bottom (for left/right respectively)
+	StereoVerticalLayout = 1, // Stereo frames are Bottom/Top (for left/right respectively)
 	StereoHorizontalLayout = 2 // Stereo frames are Left/Right
 };
 
@@ -167,7 +167,7 @@ private:
 
 	static void UpdateHMDDeviceID();
 
-	void SetFramePose_RenderThread(FMatrix NewFramePose) {FramePose = NewFramePose;}
+	void SetFramePose_RenderThread(FMatrix44f NewFramePose) {FramePose = NewFramePose;}
 	
 	FScreenPassTexture DrawFullscreenPassthrough_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessMaterialInputs& Inputs);
 
@@ -188,24 +188,24 @@ private:
 
 	void UpdateTransformParameters();
 
-	void GetCameraIntrinsics(const uint32 CameraId, FVector2D& FocalLength, FVector2D& Center);
-	FMatrix GetCameraProjection(const uint32 CameraId, const float ZNear, const float ZFar);
-	FMatrix GetCameraProjectionInv(const uint32 CameraId, const float ZNear, const float ZFar);
-	bool GetTrackedCameraEyePoses(FMatrix& LeftPose, FMatrix& RightPose);
-	FMatrix GetHMDRawMVPMatrix(const EStereoscopicEye Eye);
+	void GetCameraIntrinsics(const uint32 CameraId, FVector2f& FocalLength, FVector2f& Center);
+	FMatrix44f GetCameraProjection(const uint32 CameraId, const float ZNear, const float ZFar);
+	FMatrix44f GetCameraProjectionInv(const uint32 CameraId, const float ZNear, const float ZFar);
+	bool GetTrackedCameraEyePoses(FMatrix44f& LeftPose, FMatrix44f& RightPose);
+	FMatrix44f GetHMDRawMVPMatrix(const EStereoscopicEye Eye);
 	
 	/**
 	 * Returns a matrix that can transform a [-1 to 1] screenspace quad with the camera frame UV mapped it, 
 	 * so that the frame is correctly projected for the view. The right eye UVs need to be shifted by 0.5 horizontally.
 	 */
-	FMatrix GetTrackedCameraQuadTransform(const EStereoscopicEye Eye, const float ProjectionDistanceNear, const float ProjectionDistanceFar);
+	FMatrix44f GetTrackedCameraQuadTransform(const EStereoscopicEye Eye, const float ProjectionDistanceNear, const float ProjectionDistanceFar);
 
 	/**
 	 * Returns a 3x3 matrix that transforms the screenspace UVs for the camera frame.
 	 * Since the transformation is non-linear in R2, if done in the vertex shader, 
 	 * the output Uvs will need to be passed as homogenous coordinates to the fragment shader.
 	 */
-	FMatrix GetTrackedCameraUVTransform(const EStereoscopicEye Eye, const float ProjectionDistance);
+	FMatrix44f GetTrackedCameraUVTransform(const EStereoscopicEye Eye, const float ProjectionDistance);
 
 private:
 
@@ -225,29 +225,29 @@ private:
 
 	int32 StencilTestValue;
 
-	FMatrix LeftFrameTransformFar;
-	FMatrix LeftFrameTransformNear;
-	FMatrix RightFrameTransformFar;
-	FMatrix RightFrameTransformNear;
+	FMatrix44f LeftFrameTransformFar;
+	FMatrix44f LeftFrameTransformNear;
+	FMatrix44f RightFrameTransformFar;
+	FMatrix44f RightFrameTransformNear;
 
-	FMatrix FramePose;
+	FMatrix44f FramePose;
 	
 	vr::EVRTrackedCameraFrameType FrameType;
 	vr::TrackedCameraHandle_t CameraHandle;
 	vr::CameraVideoStreamFrameHeader_t CameraFrameHeader;
 	ESteamVRStereoFrameLayout FrameLayout;
 
-	FMatrix CameraLeftToRightPose;
-	FMatrix CameraLeftToHMDPose;
-	FMatrix FrameCameraToTrackingPose;
+	FMatrix44f CameraLeftToRightPose;
+	FMatrix44f CameraLeftToHMDPose;
+	FMatrix44f FrameCameraToTrackingPose;
 
-	FMatrix RawHMDProjectionLeft;
-	FMatrix RawHMDViewLeft;
-	FMatrix RawHMDProjectionRight;
-	FMatrix RawHMDViewRight;
+	FMatrix44f RawHMDProjectionLeft;
+	FMatrix44f RawHMDViewLeft;
+	FMatrix44f RawHMDProjectionRight;
+	FMatrix44f RawHMDViewRight;
 
-	TUniquePtr<TMap<FVector2D, FMatrix>> LeftCameraMatrixCache;
-	TUniquePtr<TMap<FVector2D, FMatrix>> RightCameraMatrixCache;
+	TUniquePtr<TMap<FVector2f, FMatrix44f>> LeftCameraMatrixCache;
+	TUniquePtr<TMap<FVector2f, FMatrix44f>> RightCameraMatrixCache;
 
 	UTexture* CameraTexture;
 	TUniquePtr<FUpdateTextureRegion2D> UpdateTextureRegion;
