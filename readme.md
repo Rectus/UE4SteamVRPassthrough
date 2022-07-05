@@ -1,7 +1,7 @@
 SteamVR Passthrough Plugin
 ---
 
-This Unreal Engine 4 plugin adds SteamVR passthrough camera support using the OpenVR TrackedCamera API.
+This Unreal Engine 5 plugin adds SteamVR passthrough camera support using the OpenVR TrackedCamera API.
 
 Example project: https://github.com/Rectus/UE4SteamVRPassthrough_Example
 
@@ -12,13 +12,13 @@ Example project: https://github.com/Rectus/UE4SteamVRPassthrough_Example
 
 ### Note ###
 
-This is a very early release. It has only been tested with the Valve Index.
+This is an experimental release. It has only been tested with a few headsets.
 
 Any feedback or issue reports are appreciated.
 
 ### Requirements ###
 
-UE4 version 4.26 or 4.27 (the example project only supports 4.27).
+Unreal engine version 5.0
 
 Windows or Linux (Linux support not tested).
 
