@@ -210,17 +210,23 @@ FScreenPassTexture FSteamVRPassthroughRenderer::DrawFullscreenPassthrough_Render
 
 	PSPassParameters->FrameUVOffset = GetFrameUVOffset(View.StereoPass, FrameLayout);
 
-	FScreenPassPipelineState PipelineState;
-	if (StencilTestValue < 0)
+	FRHIBlendState* BlendState = TStaticBlendState<>::GetRHI();
+	FRHIDepthStencilState* StencilState = TStaticDepthStencilState<>::GetRHI();
+
+	if (SceneAlphaMask)
 	{
-		PipelineState = FScreenPassPipelineState(VertexShader, PixelShader);
+		// Blend based on the inverse render target alpha.
+		BlendState = TStaticBlendState<CW_RGB, BO_Add, BF_DestAlpha, BF_InverseDestAlpha>::GetRHI();
 	}
-	else
+
+	if (StencilTestValue >= 0)
 	{
 		PSPassParameters->RenderTargets.DepthStencil = FDepthStencilBinding(Inputs.CustomDepthTexture, ERenderTargetLoadAction::ELoad, ERenderTargetLoadAction::ELoad, FExclusiveDepthStencil::DepthRead_StencilRead);
 
-		PipelineState = FScreenPassPipelineState(VertexShader, PixelShader, TStaticBlendState<>::GetRHI(), TStaticDepthStencilState<false, CF_Always, true, CF_Equal>::GetRHI());
+		StencilState = TStaticDepthStencilState<false, CF_Always, true, CF_Equal>::GetRHI();
 	}
+
+	FScreenPassPipelineState PipelineState = FScreenPassPipelineState(VertexShader, PixelShader, BlendState, StencilState);
 
 	int32 StencilVal = StencilTestValue;
 

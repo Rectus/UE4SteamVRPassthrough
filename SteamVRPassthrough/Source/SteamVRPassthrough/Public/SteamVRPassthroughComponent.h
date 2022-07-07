@@ -93,6 +93,15 @@ public:
 		int32 StencilTestValue;
 
 	/**
+	* Blends the passthrough opacity using the inverse scene alpha channel when using the simple postprocess shader.
+	* When enabled, the shader will draw the passthrough in places where nothing is rendered in the scene.
+	* Unlike custom depth, this is correctly MSAA blended for smoother borders.
+	* Requires the setting "Enable alpha channel support in post processing" to be set to "allow through tonemapping".
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetSceneAlphaMask, Category = PostProcess, DisplayName = "Simple scene alpha channel opacity influence")
+		bool SceneAlphaMask;
+
+	/**
 	* Is the camera video stream enabled.
 	*/
 	UPROPERTY(BlueprintReadOnly, Category = Camera)
@@ -141,6 +150,9 @@ public:
 
 	UFUNCTION(BlueprintSetter)
 		void SetStencilTestValue(int32 InStencilTestValue);
+
+	UFUNCTION(BlueprintSetter)
+		void SetSceneAlphaMask(bool InSceneAlphaMask);
 
 	UFUNCTION(BlueprintSetter)
 		void SetPostProcessMaterial(UMaterialInterface* Material);

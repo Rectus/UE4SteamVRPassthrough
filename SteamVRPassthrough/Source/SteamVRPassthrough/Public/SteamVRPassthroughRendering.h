@@ -124,6 +124,11 @@ public:
 		StencilTestValue = InStencilTestValue;
 	}
 
+	void SetSceneAlphaMask(bool InSceneAlphaMask)
+	{
+		SceneAlphaMask = InSceneAlphaMask;
+	}
+
 	void SetPostProcessOverlayMode(ESteamVRPostProcessPassthroughMode InPostProcessMode)
 	{
 		PostProcessMode = InPostProcessMode;
@@ -224,6 +229,7 @@ private:
 	float PostProcessProjectionDistanceNear;
 
 	int32 StencilTestValue;
+	bool SceneAlphaMask;
 
 	FMatrix LeftFrameTransformFar;
 	FMatrix LeftFrameTransformNear;

@@ -16,6 +16,7 @@ USteamVRPassthroughComponent::USteamVRPassthroughComponent()
 	FrameType = ESteamVRTrackedCameraFrameType::VRFrameType_MaximumUndistorted;
 	PostProcessProjectionDistance = FVector2D(600.0, 100.0);
 	StencilTestValue = -1;
+	SceneAlphaMask = false;
 	bEnableSharedCameraTexture = true;
 }
 
@@ -71,6 +72,7 @@ bool USteamVRPassthroughComponent::EnableVideo()
 	if (PassthroughRenderer.Get()->Initialize())
 	{
 		PassthroughRenderer->SetDepthStencilTestValue(StencilTestValue);
+		PassthroughRenderer->SetSceneAlphaMask(SceneAlphaMask);
 		PassthroughRenderer->SetPostProcessOverlayMode(PostProcessOverlayMode);
 
 		if (PostProcessMaterial)
@@ -191,6 +193,17 @@ void USteamVRPassthroughComponent::SetStencilTestValue(int32 InStencilTestValue)
 	if (PassthroughRenderer.IsValid())
 	{
 		PassthroughRenderer->SetDepthStencilTestValue(StencilTestValue);
+	}
+}
+
+
+void USteamVRPassthroughComponent::SetSceneAlphaMask(bool InSceneAlphaMask)
+{
+	SceneAlphaMask = InSceneAlphaMask;
+
+	if (PassthroughRenderer.IsValid())
+	{
+		PassthroughRenderer->SetSceneAlphaMask(SceneAlphaMask);
 	}
 }
 
